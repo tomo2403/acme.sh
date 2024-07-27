@@ -19,7 +19,7 @@ multideploy_deploy() {
   _debug _cfullchain "$_cfullchain"
 
   DOMAIN_DIR=$_cdomain
-  if [ "$DOMAIN_PATH" = *"$ECC_SUFFIX" ]; then
+  if [[ "$DOMAIN_PATH" = *"$ECC_SUFFIX" ]]; then
     DOMAIN_DIR="$DOMAIN_DIR"_ecc
   fi
   _debug2 "DOMAIN_DIR" "$DOMAIN_DIR"
@@ -47,8 +47,8 @@ multideploy_deploy() {
       export "$(_resolve_variables "$var")"
     done
 
-    _info "$(__green "Deploying to service") ("$(echo "$SERVICE" | jq -r '.name')" via $HOOK)"
-    if [ "$DOMAIN_PATH" = *"$ECC_SUFFIX" ]; then
+    _info "$(__green "Deploying to service") ($(echo "$SERVICE" | jq -r '.name') via $HOOK)"
+    if [[ "$DOMAIN_PATH" = *"$ECC_SUFFIX" ]]; then
       _debug "User wants to use ECC."
       deploy "$_cdomain" "$HOOK" "isEcc"
     else
@@ -145,7 +145,6 @@ _validate_services_json() {
   # Validate each service in the selected config
   services=$(echo "$selected_config" | jq -c '.[]')
   _secure_debug2 "services" "$services"
-  error="0"
   for service in $services; do
     name=$(echo "$service" | jq -r '.name')
     hook=$(echo "$service" | jq -r '.hook')
