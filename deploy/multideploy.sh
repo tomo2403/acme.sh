@@ -19,7 +19,7 @@ multideploy_deploy() {
   _debug _cfullchain "$_cfullchain"
 
   DOMAIN_DIR=$_cdomain
-  if [[ "$DOMAIN_PATH" = *"$ECC_SUFFIX" ]]; then
+  if echo "$DOMAIN_PATH" | grep -q "$ECC_SUFFIX"; then
     DOMAIN_DIR="$DOMAIN_DIR"_ecc
   fi
   _debug2 "DOMAIN_DIR" "$DOMAIN_DIR"
@@ -48,7 +48,7 @@ multideploy_deploy() {
     done
 
     _info "$(__green "Deploying to service") ($(echo "$SERVICE" | jq -r '.name') via $HOOK)"
-    if [[ "$DOMAIN_PATH" = *"$ECC_SUFFIX" ]]; then
+    if echo "$DOMAIN_PATH" | grep -q "$ECC_SUFFIX"; then
       _debug "User wants to use ECC."
       deploy "$_cdomain" "$HOOK" "isEcc"
     else
