@@ -94,6 +94,25 @@ _validate_services_json() {
   # Check if the file exists
   if [ ! -f "$services_file" ]; then
     _err "Services file $services_file not found."
+    _debug2 "Creating a default template."
+
+    # Create a default template
+    echo '{
+    "version": "'$required_version'",
+    "configs": {
+        "default": [
+            {
+                "name": "example",
+                "hook": "example",
+                "vars": {
+                    "EXAMPLE_VAR": "example"
+                }
+            }
+        ]
+    }
+}' >"$services_file"
+
+    _info "$(__green "Default services file created at $services_file.") Edit it to add your services and try again."
     return 1
   fi
 
