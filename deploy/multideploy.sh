@@ -36,8 +36,9 @@ multideploy_deploy() {
   SERVICES_FILE="$DOMAIN_PATH/multideploy.json"
   _check_structure "$SERVICES_FILE" || return 1
 
+  OLDIFS=$IFS
   # Iterate through all services
-  echo $(jq -r ".configs.$MD_CONFIG" "$SERVICES_FILE") | jq -c '.[]' | while read -r SERVICE; do
+  jq -r ".configs.$MD_CONFIG" "$SERVICES_FILE" | jq -c '.[]' | while read -r SERVICE; do
     NAME=$(echo "$SERVICE" | jq -r '.name')
     HOOK=$(echo "$SERVICE" | jq -r '.hook')
     VARS=$(echo "$SERVICE" | jq -r '.vars | to_entries | .[] | "\(.key)=\"\(.value)\""')
@@ -51,7 +52,7 @@ multideploy_deploy() {
     for VAR in $VARS; do
       export "$(_resolve_variables "$VAR")"
     done
-    IFS=$' \t\n'
+    IFS=$OLDIFS
 
     _info "$(__green "Deploying") to '$NAME' using '$HOOK'"
     if echo "$DOMAIN_PATH" | grep -q "$ECC_SUFFIX"; then
@@ -70,9 +71,8 @@ multideploy_deploy() {
       _cleardomainconf "SAVED_$KEY"
       unset "$KEY"
     done
-    IFS=$' \t\n'
+    IFS=$OLDIFS
   done
-
 
   _debug2 "Setting Le_DeployHook"
   _savedomainconf "Le_DeployHook" "multideploy"
@@ -165,13 +165,13 @@ _check_structure() {
 
     # Check if name and hook are strings
     _debug3 "NAME" "$NAME"
-    if [ -z "$NAME" ] || [ "$NAME" = "null" ] || ! [[ "$NAME" =~ ^[a-zA-Z0-9_\-]+$ ]]; then
+    if [ -z "$NAME" ] || [ "$NAME" = "null" ] || ! echo "$NAME" | grep -Eq '^[a-zA-Z0-9_\-]+$'; then
       _err "Service: 'name' is missing or not a string."
       error_count=$((error_count + 1))
     fi
 
     _debug3 "HOOK" "$HOOK"
-    if [ -z "$HOOK" ] || [ "$HOOK" = "null" ] || ! [[ "$HOOK" =~ ^[a-zA-Z0-9_\-]+$ ]]; then
+    if [ -z "$HOOK" ] || [ "$HOOK" = "null" ] || ! echo "$HOOK" | grep -Eq '^[a-zA-Z0-9_\-]+$'; then
       _err "Service $NAME: 'hook' is missing or not a string."
       error_count=$((error_count + 1))
     fi
