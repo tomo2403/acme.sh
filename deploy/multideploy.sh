@@ -27,44 +27,54 @@ multideploy_deploy() {
   MD_CONFIG="${MD_CONFIG:-$(_getdeployconf MD_CONFIG)}"
   if [ -z "$MD_CONFIG" ]; then
     MD_CONFIG="default"
-    _info "MD_CONFIG is not set, so we will use default."
+    _info "MD_CONFIG is not set, so we will use 'default'."
   else
     _savedeployconf "MD_CONFIG" "$MD_CONFIG"
     _debug2 "MD_CONFIG" "$MD_CONFIG"
   fi
 
-  SERVICES_FILE="$DOMAIN_PATH/services.json"
-  _validate_services_json "$SERVICES_FILE" || return 1
+  SERVICES_FILE="$DOMAIN_PATH/multideploy.json"
+  _check_structure "$SERVICES_FILE" || return 1
 
-  SERVICES=$(jq -c ".configs.\"$MD_CONFIG\"[]" "$SERVICES_FILE")
-
-  for SERVICE in $SERVICES; do
+  # Iterate through all services
+  echo $(jq -r ".configs.$MD_CONFIG" "$SERVICES_FILE") | jq -c '.[]' | while read -r SERVICE; do
+    NAME=$(echo "$SERVICE" | jq -r '.name')
     HOOK=$(echo "$SERVICE" | jq -r '.hook')
-    VARS=$(echo "$SERVICE" | jq -r '.vars | to_entries | .[] | "\(.key)=\(.value)"')
+    VARS=$(echo "$SERVICE" | jq -r '.vars | to_entries | .[] | "\(.key)=\"\(.value)\""')
 
-    for var in $VARS; do
-      _secure_debug2 "Exporting $var"
-      export "$(_resolve_variables "$var")"
+    _debug2 "NAME" "$NAME"
+    _debug2 "HOOK" "$HOOK"
+    _secure_debug2 VARS "$VARS"
+
+    IFS=$'\n'
+    _debug2 "Exporting all variables"
+    for VAR in $VARS; do
+      export "$(_resolve_variables "$VAR")"
     done
+    IFS=$' \t\n'
 
-    _info "$(__green "Deploying to service") ($(echo "$SERVICE" | jq -r '.name') via $HOOK)"
+    _info "$(__green "Deploying") to '$NAME' using '$HOOK'"
     if echo "$DOMAIN_PATH" | grep -q "$ECC_SUFFIX"; then
-      _debug "User wants to use ECC."
+      _debug2 "User wants to use ECC."
       deploy "$_cdomain" "$HOOK" "isEcc"
     else
       deploy "$_cdomain" "$HOOK"
     fi
 
     # Delete exported variables
+    _debug2 "Deleting all variables"
+    IFS=$'\n'
     for VAR in $VARS; do
       KEY=$(echo "$VAR" | cut -d'=' -f1)
       _debug3 "Deleting KEY" "$KEY"
       _cleardomainconf "SAVED_$KEY"
       unset "$KEY"
     done
+    IFS=$' \t\n'
   done
 
-  _debug3 "Setting Le_DeployHook"
+
+  _debug2 "Setting Le_DeployHook"
   _savedomainconf "Le_DeployHook" "multideploy"
 
   return 0
@@ -78,27 +88,27 @@ _resolve_variables() {
   key=$(echo "$var" | cut -d'=' -f1)
   value=$(echo "$var" | cut -d'=' -f2-)
 
+  _secure_debug3 "Resolving $key" "$value"
   while echo "$value" | grep -q '\$'; do
-    value=$(eval "echo \"$value\"")
+    value=\"$(eval "echo $value")\"
   done
 
+  _secure_debug3 "Resolved $key" "$value"
   echo "$key=$value"
 }
 
-# filepath
-_validate_services_json() {
+_check_structure() {
   services_file="$1"
-  required_version="1.0"
-  error_count=0
+  services_version="1.0"
 
-  # Check if the file exists
+  # Check if the services_file exists
   if [ ! -f "$services_file" ]; then
-    _err "Services file $services_file not found."
-    _debug2 "Creating a default template."
+    _err "Services file not found."
+    _debug3 "Creating a default template."
 
     # Create a default template
     echo '{
-    "version": "'$required_version'",
+    "version": "'$services_version'",
     "configs": {
         "default": [
             {
@@ -112,66 +122,86 @@ _validate_services_json() {
     }
 }' >"$services_file"
 
-    _info "$(__green "Default services file created at $services_file.") Edit it to add your services and try again."
+    _info "$(__green "Services file created") at $services_file. Edit it to add your services and try again."
     return 1
   fi
 
   # Check if jq is installed
-  if ! command -v jq >/dev/null; then
-    _err "jq could not be found. Please install jq to use this script."
+  if ! command -v jq >/dev/null 2>&1; then
+    _err "jq is required but not installed. Please install jq and try again."
     return 1
   fi
 
-  # Check if the file is a valid JSON
-  if ! jq empty "$services_file" >/dev/null 2>&1; then
-    _err "Invalid JSON format in $services_file."
+  # Check if version is 1.0
+  VERSION=$(jq -r '.version' "$services_file")
+  if [ "$VERSION" != $services_version ]; then
+    _err "Version is not $services_version! Found: $VERSION"
     return 1
   fi
+  _debug3 "VERSION" "$VERSION"
 
-  # Check the version
-  version=$(jq -r '.version' "$services_file")
-  if [ "$version" != "$required_version" ]; then
-    _err "Version mismatch. Expected $required_version, got $version."
+  # Check if configs contain the default configuration
+  CONFIGS=$(jq -r '.configs | keys' "$services_file")
+  if ! echo "$CONFIGS" | grep -q "$MD_CONFIG"; then
+    _err "Configuration $MD_CONFIG not found in configs."
     return 1
   fi
+  _debug3 "CONFIGS" "$CONFIGS"
 
-  # Use the selected config (MD_CONFIG)
-  selected_config=$(jq -e ".configs[\"$MD_CONFIG\"]" "$services_file")
-  if [ $? -ne 0 ]; then
-    _err "'$MD_CONFIG' config not found in $services_file."
+  # Extract services of the selected configuration
+  SERVICES=$(jq -r ".configs.$MD_CONFIG" "$services_file")
+  if [ -z "$SERVICES" ] || [ "$SERVICES" = "[]" ]; then
+    _err "No services found in configuration '$MD_CONFIG'."
     return 1
   fi
+  _debug "SERVICES" "$SERVICES"
 
-  # Validate each service in the selected config
-  services=$(echo "$selected_config" | jq -c '.[]')
-  _secure_debug2 "services" "$services"
-  for service in $services; do
-    name=$(echo "$service" | jq -r '.name')
-    hook=$(echo "$service" | jq -r '.hook')
-    vars=$(echo "$service" | jq -c '.vars')
+  # Iterate through all services
+  echo "$SERVICES" | jq -c '.[]' | while read -r SERVICE; do
+    error_count=0
+    NAME=$(echo "$SERVICE" | jq -r '.name')
+    HOOK=$(echo "$SERVICE" | jq -r '.hook')
+    VARS=$(echo "$SERVICE" | jq -r '.vars')
 
     # Check if name and hook are strings
-    if [ -z "$name" ] || [ "$name" = "null" ]; then
-      _err "Service name is missing or not a string in $service."
+    _debug3 "NAME" "$NAME"
+    if [ -z "$NAME" ] || [ "$NAME" = "null" ] || ! [[ "$NAME" =~ ^[a-zA-Z0-9_\-]+$ ]]; then
+      _err "Service: 'name' is missing or not a string."
       error_count=$((error_count + 1))
     fi
 
-    if [ -z "$hook" ] || [ "$hook" = "null" ]; then
-      _err "Service hook is missing or not a string in $service."
+    _debug3 "HOOK" "$HOOK"
+    if [ -z "$HOOK" ] || [ "$HOOK" = "null" ] || ! [[ "$HOOK" =~ ^[a-zA-Z0-9_\-]+$ ]]; then
+      _err "Service $NAME: 'hook' is missing or not a string."
       error_count=$((error_count + 1))
     fi
 
-    if [ -z "$vars" ] || [ "$vars" = "null" ]; then
-      _err "Service vars is missing or not an object in $service."
+    if [ -z "$VARS" ] || [ "$VARS" = "null" ]; then
+      _err "Service $NAME: 'vars' is missing or does not contain values."
       error_count=$((error_count + 1))
+    else
+      # Check if vars is an object and all its values are strings
+      VAR_KEYS=$(echo "$VARS" | jq -r 'keys[]')
+      for KEY in $VAR_KEYS; do
+        VALUE=$(echo "$VARS" | jq -r ".\"$KEY\"")
+        _secure_debug3 "$KEY" "$VALUE"
+        if [ -z "$VALUE" ] && [ "$VALUE" != "" ]; then
+          _err "Service $NAME: 'vars.$KEY' is missing or not a string."
+          error_count=$((error_count + 1))
+        fi
+      done
+    fi
+
+    if [ $error_count -gt 0 ]; then
+      _err "$error_count errors found in service '$NAME'."
+      return 1
     fi
   done
 
-  if [ $error_count -gt 0 ]; then
-    _err "$error_count errors found during validation."
+  if [ $? -ne 0 ]; then
     return 1
   fi
 
-  _info "Services file $services_file validated successfully for config '$MD_CONFIG'."
+  _info "$(__green "Configuration validated")"
   return 0
 }
