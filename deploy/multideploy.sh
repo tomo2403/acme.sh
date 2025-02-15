@@ -4,13 +4,14 @@
 
 ########  Public functions #####################
 
-# domain keyfile certfile cafile fullchain
+# domain keyfile certfile cafile fullchain pfx
 multideploy_deploy() {
   _cdomain="$1"
   _ckey="$2"
   _ccert="$3"
   _cca="$4"
   _cfullchain="$5"
+  _cpfx="$6"
 
   _debug _cdomain "$_cdomain"
   _debug _ckey "$_ckey"
